@@ -4,8 +4,8 @@
 
 #setup procedure
 #set ip address -> ipconfig
-#set PUBLIC_IP=192.168.1.111
-#set DOCKER_HOST_IP=192.168.1.111
+#set PUBLIC_IP=192.168.1.239
+#set DOCKER_HOST_IP=192.168.1.239
 
 #ALL
 #docker-compose up --build --remove-orphans
@@ -38,7 +38,10 @@
 #docker exec -ti kafkacat kafkacat
 #kafkacat -b kafka-1:9092 -t rawGames
 
-version: '3'
+version: '3.5'
+networks:
+  default:
+    name: kafka-network
 # enforce some dependencies
 services:
   #================================== Zookeeper ========================================== #}
@@ -58,7 +61,8 @@ services:
       - ./data-transfer:/data-transfer
     restart: unless-stopped
   # make sure that internal replication factor is not larger than the number of Kafka nodes
-  #================================== Kafka-1 ========================================== #}
+  #================================== Kafka Broker ========================================== #}
+  #Kafka-1
   kafka-1:
     image: confluentinc/cp-kafka:5.5.0
     container_name: kafka-1
@@ -92,7 +96,7 @@ services:
       - ./data-transfer:/data-transfer
       #- ./kafka/data1:/var/lib/kafka/data
     restart: unless-stopped  
-  #================================== Kafka-2 ========================================== #}
+  #Kafka-2
   kafka-2:
     image: confluentinc/cp-kafka:5.5.0
     container_name: kafka-2
@@ -126,7 +130,7 @@ services:
       - ./data-transfer:/data-transfer
        #- ./kafka/data2:/var/lib/kafka/data
     restart: unless-stopped
-  #================================== kafka-3 ========================================== #}
+  #Kafka-3
   kafka-3:
     image: confluentinc/cp-kafka:5.5.0
     container_name: kafka-3
@@ -182,6 +186,159 @@ services:
     volumes:
       - ./data-transfer:/data-transfer
     restart: unless-stopped
+  #================================== Schema Registry UI ========================================== #}
+  schema-registry-ui:
+    image: landoop/schema-registry-ui:latest
+    container_name: schema-registry-ui
+    hostname: schema-registry-ui
+    labels:
+      com.mdps.service.webui.url: http://${PUBLIC_IP}:28102
+    depends_on:
+      - kafka-1
+      - schema-registry-1
+    ports:
+      - 28102:8000
+    environment:
+      SCHEMAREGISTRY_URL: http://${PUBLIC_IP}:8081
+    volumes:
+      - ./data-transfer:/data-transfer
+    restart: unless-stopped
+  #================================== ksqlDB ========================================== #}
+  #ksqldb1
+  ksqldb-server-1:
+    image: confluentinc/ksqldb-server:0.14.0
+    hostname: ksqldb-server-1
+    container_name: ksqldb-server-1
+    labels:
+      com.mdps.service.restapi.url: http://${PUBLIC_IP}:8088
+    ports:
+      - 8088:8088
+      - 1095:1095
+    depends_on:
+      - schema-registry-1
+    environment:
+      KSQL_CONFIG_DIR: /etc/ksql
+      KSQL_LOG4J_OPTS: -Dlog4j.configuration=file:/etc/ksql/log4j-rolling.properties
+      KSQL_HOST_NAME: ksqldb-server-1
+      KSQL_APPLICATION_ID: kafka-demo
+      KSQL_KSQL_SERVICE_ID: kafka-demo
+      KSQL_LISTENERS: http://0.0.0.0:8088
+      KSQL_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19093,kafka-3:19094
+      KSQL_KSQL_SCHEMA_REGISTRY_URL: http://schema-registry-1:8081
+      KSQL_LOG4J_PROCESSING_LOG_TOPIC: demo_processing_log
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_NAME: demo_processing_log
+      KSQL_LOGGING_PROCESSING_TOPIC_REPLICATION_FACTOR: 1
+      KSQL_KSQL_INTERNAL_TOPIC_REPLICAS: 1
+      KSQL_KSQL_STREAMS_REPLICATION_FACTOR: 1
+      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: 'true'
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: 'true'
+      KSQL_KSQL_QUERY_PULL_METRICS_ENABLED: 'true'
+      KSQL_KSQL_HIDDEN_TOPICS: ^_.*
+      KSQL_KSQL_SUPPRESS_ENABLED: 'False'
+      KSQL_KSQL_SUPPRESS_BUFFER_SIZE_BYTES: '-1'
+      KSQL_JMX_OPTS: -Djava.rmi.server.hostname=localhost -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=1095 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.rmi.port=1095
+    volumes:
+      - ./data-transfer:/data-transfer
+      - ./plugins/ksql:/etc/ksql/ext
+    restart: unless-stopped
+#    #ksqldb2
+#    ksqldb-server-1:
+#      image: confluentinc/ksqldb-server:0.14.0
+#      hostname: ksqldb-server-2
+#      container_name: ksqldb-server-2
+#      labels:
+#        com.mdps.service.restapi.url: http://${PUBLIC_IP}:8089
+#      ports:
+#        - 8089:8088
+#        - 1096:1095
+#      depends_on:
+#        - schema-registry-1
+#      environment:
+#        KSQL_CONFIG_DIR: /etc/ksql
+#        KSQL_LOG4J_OPTS: -Dlog4j.configuration=file:/etc/ksql/log4j-rolling.properties
+#        KSQL_HOST_NAME: ksqldb-server-2
+#        KSQL_APPLICATION_ID: kafka-demo
+#        KSQL_KSQL_SERVICE_ID: kafka-demo
+#        KSQL_LISTENERS: http://0.0.0.0:8088
+#        KSQL_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19093,kafka-3:19094
+#        KSQL_KSQL_SCHEMA_REGISTRY_URL: http://schema-registry-1:8081
+#        KSQL_LOG4J_PROCESSING_LOG_TOPIC: demo_processing_log
+#        KSQL_KSQL_LOGGING_PROCESSING_TOPIC_NAME: demo_processing_log
+#        KSQL_LOGGING_PROCESSING_TOPIC_REPLICATION_FACTOR: 1
+#        KSQL_KSQL_INTERNAL_TOPIC_REPLICAS: 1
+#        KSQL_KSQL_STREAMS_REPLICATION_FACTOR: 1
+#        KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: 'true'
+#        KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: 'true'
+#        KSQL_KSQL_QUERY_PULL_METRICS_ENABLED: 'true'
+#        KSQL_KSQL_HIDDEN_TOPICS: ^_.*
+#        KSQL_KSQL_SUPPRESS_ENABLED: 'False'
+#        KSQL_KSQL_SUPPRESS_BUFFER_SIZE_BYTES: '-1'
+#        KSQL_JMX_OPTS: -Djava.rmi.server.hostname=localhost -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=1095 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.rmi.port=1095
+#      volumes:
+#        - ./data-transfer:/data-transfer
+#        - ./plugins/ksql:/etc/ksql/ext
+#      restart: unless-stopped
+#================================== ksql cli ========================================== #}
+  ksqldb-cli:
+    image: confluentinc/ksqldb-cli:0.9.0
+    container_name: ksqldb-cli
+    hostname: ksqldb-cli
+    depends_on:
+      - ksqldb-server-1
+    volumes:
+      - ./data-transfer:/data-transfer
+    entrypoint: /bin/sh
+    tty: true
+  #================================== Confluent REST Proxy ========================================== #
+  kafka-rest-1:
+    image: confluentinc/cp-kafka-rest:6.0.0
+    container_name: kafka-rest-1
+    hostname: kafka-rest-1
+    labels:
+      com.mdps.service.restapi.url: http://${PUBLIC_IP}:18086
+    depends_on:
+      - kafka-1
+      - schema-registry-1
+    ports:
+      - 18086:8086
+    environment:
+      KAFKA_REST_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19093,kafka-3:19094
+      KAFKA_REST_LISTENERS: http://0.0.0.0:8086
+      KAFKA_REST_SCHEMA_REGISTRY_URL: http://schema-registry-1:8081
+      KAFKA_REST_HOST_NAME: kafka-rest-1
+    volumes:
+      - ./data-transfer:/data-transfer
+    restart: unless-stopped
+  #================================== StreamSets DataCollector ========================================== #
+  streamsets-1:
+    image: trivadis/streamsets-kafka-hadoop-aws:3.20.0
+    container_name: streamsets-1
+    hostname: streamsets-1
+    labels:
+      com.mdps.service.webui.title: StreamSets Data Collector UI
+      com.mdps.service.webui.url: http://${PUBLIC_IP}:18630
+      com.mdps.service.restapi.url: http://${PUBLIC_IP}:18630/collector/restapi
+    ports:
+      - 18630:18630
+      - 28500:28500
+    environment:
+      SDC_OFFSET_DIRECTORY: /data/custom-offset-el
+      SDC_JAVA_OPTS: -Xmx2g -Xms2g
+      SDC_JAVA8_OPTS: -XX:+UseG1GC
+      SDC_CONF_MONITOR_MEMORY: 'true'
+      SDC_CONF_PIPELINE_MAX_RUNNERS_COUNT: 50
+      SDC_CONF_http_authentication: form
+    volumes:
+      - ./data-transfer:/data-transfer
+#      - ./streamsets-extras/streamsets-libs-extras/streamsets-datacollector-jdbc-lib/postgresql-42.2.6.jar:/opt/streamsets-datacollector-3.20.0/streamsets-libs-extras/streamsets-datacollector-jdbc-lib/lib/postgresql-42.2.6.jar:Z
+#      - ./streamsets-extras/libs-common-lib:/opt/streamsets-datacollector-3.20.0/libs-common-lib:Z
+      - ./plugins/streamsets/user-libs:/opt/streamsets-datacollector-user-libs:Z
+    ulimits:
+      nofile:
+        soft: 32768
+        hard: 32768
+    user: '1000'
+    restart: unless-stopped
 #================================== python and bash ============================ #}
 #  python-1:
 #    build: 
@@ -220,23 +377,7 @@ services:
 #    tty: true
 #    volumes:
 #      - ./faust/data-transfer:/usr/src/app/data-transfer
-  #================================== Schema Registry UI ========================================== #}
-  schema-registry-ui:
-    image: landoop/schema-registry-ui:latest
-    container_name: schema-registry-ui
-    hostname: schema-registry-ui
-    labels:
-      com.mdps.service.webui.url: http://${PUBLIC_IP}:28102
-    depends_on:
-      - kafka-1
-      - schema-registry-1
-    ports:
-      - 28102:8000
-    environment:
-      SCHEMAREGISTRY_URL: http://${PUBLIC_IP}:8081
-    volumes:
-      - ./data-transfer:/data-transfer
-    restart: unless-stopped
+  
   #================================== Kafkacat  ========================================== #}
   kafkacat:
     image: edenhill/kafkacat:1.5.0
@@ -276,91 +417,21 @@ services:
     volumes:
       - ./data-transfer:/data-transfer
     restart: unless-stopped
-
-  #================================== ksqlDB ========================================== #}
-  ksqldb-server-1:
-    image: confluentinc/ksqldb-server:0.9.0
-    hostname: ksqldb-server-1
-    container_name: ksqldb-server-1
+  #  ================================== Jupyter ========================================== #
+  jupyter:
+    image: jupyter/minimal-notebook:latest
+    container_name: jupyter
+    hostname: jupyter
     labels:
-      com.mdps.service.restapi.url: http://${PUBLIC_IP}:8088
+      com.platys.webui.title: Jupyter UI
+      com.platys.webui.url: http://${PUBLIC_IP}:28888
     ports:
-      - 8088:8088
-    depends_on:
-      - kafka-1
-      - schema-registry-1
+      - 28888:8888
     environment:
-      KSQL_CONFIG_DIR: /etc/ksql
-      KSQL_LOG4J_OPTS: -Dlog4j.configuration=file:/etc/ksql/log4j-rolling.properties
-      KSQL_BOOTSTRAP_SERVERS: kafka-1:19092
-      KSQL_HOST_NAME: ksqldb-server-1
-      KSQL_APPLICATION_ID: kafka-demo
-      KSQL_LISTENERS: http://0.0.0.0:8088
-      KSQL_KSQL_SCHEMA_REGISTRY_URL: http://schema-registry-1:8081
-      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: 'true'
-      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: 'true'
-      KSQL_KSQL_SERVICE_ID: kafka-demo
+      JUPYTER_ENABLE_LAB: 'true'
+      JUPYTER_TOKEN: abc123!
+      GRANT_SUDO: 'true'
+      TINI_SUBREAPER: 'true'
     volumes:
       - ./data-transfer:/data-transfer
-      - ./plugins/ksql:/etc/ksql/ext
     restart: unless-stopped
-  #================================== ksql cli ========================================== #}
-  ksqldb-cli:
-    image: confluentinc/ksqldb-cli:0.9.0
-    container_name: ksqldb-cli
-    hostname: ksqldb-cli
-    depends_on:
-      - ksqldb-server-1
-    volumes:
-      - ./data-transfer:/data-transfer
-    entrypoint: /bin/sh
-    tty: true
-    #  ================================== StreamSets DataCollector ========================================== #
-    streamsets-1:
-      image: trivadis/streamsets-kafka-hadoop-aws:3.20.0
-      container_name: streamsets-1
-      hostname: streamsets-1
-      labels:
-        com.platys.webui.title: StreamSets Data Collector UI
-        com.platys.webui.url: http://${PUBLIC_IP}:18630
-        com.platys.restapi.title: StreamSets Data Collector REST API
-        com.platys.restapi.url: http://${PUBLIC_IP}:18630/collector/restapi
-      ports:
-        - 18630:18630
-        - 28500:28500
-      environment:
-        SDC_OFFSET_DIRECTORY: /data/custom-offset-el
-        SDC_JAVA_OPTS: -Xmx2g -Xms2g
-        SDC_JAVA8_OPTS: -XX:+UseG1GC
-        SDC_CONF_MONITOR_MEMORY: 'true'
-        SDC_CONF_PIPELINE_MAX_RUNNERS_COUNT: 50
-        SDC_CONF_http_authentication: form
-      volumes:
-        - ./data-transfer:/data-transfer
-  #      - ./streamsets-extras/streamsets-libs-extras/streamsets-datacollector-jdbc-lib/postgresql-42.2.6.jar:/opt/streamsets-datacollector-3.20.0/streamsets-libs-extras/streamsets-datacollector-jdbc-lib/lib/postgresql-42.2.6.jar:Z
-  #      - ./streamsets-extras/libs-common-lib:/opt/streamsets-datacollector-3.20.0/libs-common-lib:Z
-        - ./plugins/streamsets/user-libs:/opt/streamsets-datacollector-user-libs:Z
-      ulimits:
-        nofile:
-          soft: 32768
-          hard: 32768
-      user: '1000'
-      restart: unless-stopped
-    #  ================================== Jupyter ========================================== #
-    jupyter:
-      image: jupyter/minimal-notebook:latest
-      container_name: jupyter
-      hostname: jupyter
-      labels:
-        com.platys.webui.title: Jupyter UI
-        com.platys.webui.url: http://${PUBLIC_IP}:28888
-      ports:
-        - 28888:8888
-      environment:
-        JUPYTER_ENABLE_LAB: 'true'
-        JUPYTER_TOKEN: abc123!
-        GRANT_SUDO: 'true'
-        TINI_SUBREAPER: 'true'
-      volumes:
-        - ./data-transfer:/data-transfer
-      restart: unless-stopped
